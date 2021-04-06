@@ -14,7 +14,7 @@ class chunk:
         if self.chunk_type == 'IDAT':
             return struct.pack(">I", self.length)+\
                bytes(self.chunk_type)+\
-               zlib.compress(reduce_byte_list(self.data))+\
+               reduce_byte_list(self.data)+\
                struct.pack(">I", self.crc)
         if self.chunk_type == 'IEND':
             return struct.pack(">I", self.length)+\
@@ -126,30 +126,20 @@ def unfilter(scanline):
             previous_pixel = reconstruct_pixel(pixel, previous_pixel)
     return pixels
 
-def get_pixels(filename):
-    with open(filename) as f:
-        file_signature = get_list_from_bytes(f, 8)
-        if is_png(file_signature):
-            chunks = get_all_chunks(f)
-            idat_chunk = chunks['IDAT']
-            phys_chunk = chunks['pHYs']
-            ihdr_chunk = chunks['IHDR']
-            iend_chunk = chunks['IEND']
+def get_pixels(chunks):
+    idat_chunk = chunks['IDAT']
+    phys_chunk = chunks['pHYs']
+    ihdr_chunk = chunks['IHDR']
+    iend_chunk = chunks['IEND']
 
-            print(phys_chunk.length, phys_chunk.data, phys_chunk.chunk_type,\
-                    phys_chunk.crc)
-            
-            width, height, bit_depth, color_type, compression_method,\
-                filter_method, interlace_method = parse_ihdr(ihdr_chunk.data)
-            uncompressed_data = list(zlib.decompress(\
-                    get_bytes_from_list(idat_chunk.data)))
-            decimal_data = [int(x.encode("hex"), 16) for x in uncompressed_data]
-            scanlines = get_scanlines(decimal_data, height, width)
-            pixels = unfilter(scanlines)
-            return ihdr_chunk, iend_chunk, pixels 
-        else:
-            print("Error: file is not a PNG")
-
+    width, height, bit_depth, color_type, compression_method,\
+        filter_method, interlace_method = parse_ihdr(ihdr_chunk.data)
+    uncompressed_data = list(zlib.decompress(\
+            get_bytes_from_list(idat_chunk.data)))
+    decimal_data = [int(x.encode("hex"), 16) for x in uncompressed_data]
+    scanlines = get_scanlines(decimal_data, height, width)
+    pixels = unfilter(scanlines)
+    return pixels 
 '''
 Functions for converting units
 '''
@@ -197,33 +187,71 @@ def create_data_chunk(pixels, pixel_width):
     return chunk(length, chunk_type, crc, data)
 
 def main():
-    ihdr_chunk, iend_chunk, pixels = get_pixels('simple_no_alpha.png')
+    with open('simple_no_alpha.png') as f: 
+        file_signature = get_list_from_bytes(f, 8)
 
-    meters_per_pixel = 0.002 # m or 2mm
-    pixels_per_meter = int(1/meters_per_pixel)
-    
-    canvas_width = inches_to_meters(8.5 - 1)
-    canvas_height = inches_to_meters(11 - 1)
+        if is_png(file_signature) != True:
+            print("Error: file is not a PNG") 
 
-    pixel_width = int(canvas_width * pixels_per_meter)
-    pixel_height = int(canvas_height * pixels_per_meter)
+        chunks = get_all_chunks(f)
 
-    width, height, bit_depth, color_type, compression_method,\
-        filter_method, interlace_method = parse_ihdr(ihdr_chunk.data)
+        idat_chunk = chunks['IDAT']
+        itxt_chunk = chunks['iTXt']
+        phys_chunk = chunks['pHYs']
+        ihdr_chunk = chunks['IHDR']
+        iend_chunk = chunks['IEND']
 
-    file_signature = struct.pack(">B", 137)+\
-                     struct.pack(">B", 80)+\
-                     struct.pack(">B", 78)+\
-                     struct.pack(">B", 71)+\
-                     struct.pack(">B", 13)+\
-                     struct.pack(">B", 10)+\
-                     struct.pack(">B", 26)+\
-                     struct.pack(">B", 10)
-    ihdr_chunk.data[3] = struct.pack(">B", 6)
-    ihdr_chunk.data[7] = struct.pack(">B", 1)
-    print(ihdr_chunk.data)
-    phys_chunk = create_phys_chunk(pixels_per_meter, pixels_per_meter, 1)
-    idat_chunk = create_data_chunk(pixels, pixel_width)
+        pixels = get_pixels(chunks)
+        print(pixels)
+
+        with open('simple_new.png', 'w') as new_f:
+            file_signature = struct.pack(">B", 137)+\
+                             struct.pack(">B", 80)+\
+                             struct.pack(">B", 78)+\
+                             struct.pack(">B", 71)+\
+                             struct.pack(">B", 13)+\
+                             struct.pack(">B", 10)+\
+                             struct.pack(">B", 26)+\
+                             struct.pack(">B", 10)
+            new_f.write(file_signature)
+            for c in chunks.items():
+                new_f.write(c[1].pack())
+            '''
+            new_f.write(ihdr_chunk.pack())
+            new_f.write(phys_chunk.pack())
+            new_f.write(itxt_chunk.pack())
+            new_f.write(idat_chunk.pack())
+            new_f.write(iend_chunk.pack())
+            '''
+
+    '''
+        pixels = get_pixels(chunks)
+
+        meters_per_pixel = 0.002 # m or 2mm
+        pixels_per_meter = int(1/meters_per_pixel)
+        
+        canvas_width = inches_to_meters(8.5 - 1)
+        canvas_height = inches_to_meters(11 - 1)
+
+        pixel_width = int(canvas_width * pixels_per_meter)
+        pixel_height = int(canvas_height * pixels_per_meter)
+
+        width, height, bit_depth, color_type, compression_method,\
+            filter_method, interlace_method = parse_ihdr(ihdr_chunk.data)
+
+        file_signature = struct.pack(">B", 137)+\
+                         struct.pack(">B", 80)+\
+                         struct.pack(">B", 78)+\
+                         struct.pack(">B", 71)+\
+                         struct.pack(">B", 13)+\
+                         struct.pack(">B", 10)+\
+                         struct.pack(">B", 26)+\
+                         struct.pack(">B", 10)
+        ihdr_chunk.data[3] = struct.pack(">B", 6)
+        ihdr_chunk.data[7] = struct.pack(">B", 1)
+        print(ihdr_chunk.data)
+        phys_chunk = create_phys_chunk(pixels_per_meter, pixels_per_meter, 1)
+        idat_chunk = create_data_chunk(pixels, pixel_width)
 
     with open('simple_new.png', 'w') as f:
         f.write(file_signature)
@@ -231,6 +259,7 @@ def main():
         f.write(phys_chunk.pack())
         f.write(idat_chunk.pack())
         f.write(iend_chunk.pack())
+    '''
 
 if __name__ == '__main__':
     main()
