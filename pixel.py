@@ -14,7 +14,7 @@ class chunk:
         if self.chunk_type == 'IDAT':
             return struct.pack(">I", self.length)+\
                bytes(self.chunk_type)+\
-               reduce_byte_list(self.data)+\
+               zlib.compress(reduce_byte_list(self.data))+\
                struct.pack(">I", self.crc)
         if self.chunk_type == 'IEND':
             return struct.pack(">I", self.length)+\
@@ -109,15 +109,41 @@ def parse_phys(data):
     return (pixels_per_unit_x_axis, pixels_per_unit_y_axis, unit_specifier)
 
 def reconstruct(x, a):
-    return (x + a) & 0xff
+    return (x + a) % 256
+
+def filter_function(x, a):
+    return (x - a) % 256
+
+def filter_pixel(pixel1, pixel2):
+    return [filter_function(pixel1[0], pixel2[0]),\
+            filter_function(pixel1[1], pixel2[1]),\
+            filter_function(pixel1[2], pixel2[2])]
+
+def filter(scanline):
+    pixels = []
+    print(scanline)
+    for i in range(len(scanline)):
+        previous_pixel = [0, 0, 0]
+        for j in range(1, len(scanline[i]), 3):
+            pixel = scanline[i][j:j+3]
+            pixels.append(reconstruct_pixel(pixel, previous_pixel))
+            previous_pixel = reconstruct_pixel(pixel, previous_pixel)
+    return pixels
 
 def reconstruct_pixel(pixel1, pixel2):
     return [reconstruct(pixel1[0], pixel2[0]),\
             reconstruct(pixel1[1], pixel2[1]),\
             reconstruct(pixel1[2], pixel2[2])]
 
+def reconstruct_scanline(pixels, filter_type, width):
+    scanlines = []
+    for i in range(0, len(pixels), width):
+        scanlines.append([filter_type]+reduce_byte_list(pixels[i:i+width]))
+    return scanlines
+
 def unfilter(scanline):
     pixels = []
+    print(scanline)
     for i in range(len(scanline)):
         previous_pixel = [0, 0, 0]
         for j in range(1, len(scanline[i]), 3):
@@ -199,10 +225,18 @@ def main():
         itxt_chunk = chunks['iTXt']
         phys_chunk = chunks['pHYs']
         ihdr_chunk = chunks['IHDR']
+        print(ihdr_chunk.data)
         iend_chunk = chunks['IEND']
 
         pixels = get_pixels(chunks)
-        print(pixels)
+
+        uncompressed_data = list(zlib.decompress(\
+                get_bytes_from_list(idat_chunk.data)))
+        print(uncompressed_data)
+        uncompressed_data[0] = struct.pack(">B", 0)
+        uncompressed_data[10] = struct.pack(">B", 0)
+        print(uncompressed_data)
+        idat_chunk.data = uncompressed_data
 
         with open('simple_new.png', 'w') as new_f:
             file_signature = struct.pack(">B", 137)+\
